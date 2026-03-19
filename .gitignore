@@ -1,0 +1,64 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+# Vite / frontend build
+dist/
+.vite/
+
+# Environment / config
+.env
+.env.*
+!.env.example
+
+# Coverage / test artifacts
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Logs
+logs/
+*.log
+
+# Local data & uploads (keep samples under data/example/)
+uploads/
+tmp/
+
+# Docker
+*.pid
+docker-data/
+
+openspec/
+.kilocode/
+.claude/
+.cursor/
+.gemini/
+.codex/
