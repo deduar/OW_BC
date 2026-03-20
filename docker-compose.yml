@@ -30,6 +30,10 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/migrations:/app/migrations
+      - ./backend/alembic.ini:/app/alembic.ini
     networks:
       - app-net
       - internal-net
@@ -57,6 +61,9 @@ services:
     depends_on:
       - db
     command: ["alembic", "upgrade", "head"]
+    volumes:
+      - ./backend/migrations:/app/migrations
+      - ./backend/alembic.ini:/app/alembic.ini
     environment:
       DB_HOST: db
       DB_PORT: 5432
