@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-owbc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-owbc_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-owbc}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - internal-net
+
+  backend:
+    image: owbc-backend:${OWBC_VERSION:-0.1.0-dev}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-owbc}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-owbc_pass}
+      DB_NAME: ${POSTGRES_DB:-owbc}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - app-net
+      - internal-net
+    restart: unless-stopped
+
+  frontend:
+    image: owbc-frontend:${OWBC_VERSION:-0.1.0-dev}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:3000:80"
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  migrate:
+    profiles: ["migrate"]
+    image: owbc-backend:${OWBC_VERSION:-0.1.0-dev}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - db
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-owbc}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-owbc_pass}
+      DB_NAME: ${POSTGRES_DB:-owbc}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-change-me}
+    networks:
+      - internal-net
+
+volumes:
+  db_data:
+
+networks:
+  # app-net is for communication between frontend and backend.
+  app-net:
+    driver: bridge
+  # internal-net is isolated (no external access from published ports).
+  internal-net:
+    driver: bridge
+    internal: true

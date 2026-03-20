@@ -42,7 +42,7 @@ All functional and technical details are captured in **OpenSpec** under `openspe
     - Match candidates, reconciliations, and audit events.
 
 - **Deployment & Ops**
-  - `docker-compose.yml` (to be implemented) orchestrates:
+  - `docker-compose.yml` orchestrates:
     - `frontend` (built static assets served via a lightweight web server).
     - `backend` (FastAPI app container).
     - `db` (PostgreSQL with persistent volume).
@@ -99,6 +99,8 @@ Active change:
 4. **Access the app**:
    - Frontend: `http://localhost:3000` (or configured port)
    - Backend API docs (FastAPI): `http://localhost:8000/docs`
+
+> Security note: PostgreSQL is not exposed to the host network; it is reachable only from the backend container via an internal Docker network.
 
 ---
 
