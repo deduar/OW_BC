@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlmodel import Session, select
 from app.db import get_session
 from app.models import AppUser, Tenant, UserSession
@@ -82,3 +83,19 @@ def login(
     )
     
     return Token(session_token=token)
+
+@router.post("/logout")
+def logout(
+    response: Response,
+    session: Session = Depends(get_session),
+    session_token: Annotated[str | None, Cookie()] = None,
+):
+    if session_token:
+        statement = select(UserSession).where(UserSession.session_token == session_token)
+        db_session = session.exec(statement).first()
+        if db_session:
+            session.delete(db_session)
+            session.commit()
+    
+    response.delete_cookie(key="session_token")
+    return {"detail": "Successfully logged out"}
