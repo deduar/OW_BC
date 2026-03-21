@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timedelta, timezone
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlmodel import Session, select
 from app.db import get_session
-from app.models import AppUser, Tenant
-from app.schemas import UserCreate, UserResponse
-from app.security import get_password_hash
+from app.models import AppUser, Tenant, UserSession
+from app.schemas import UserCreate, UserResponse, LoginRequest, Token
+from app.security import get_password_hash, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,3 +37,48 @@ def register(user_in: UserCreate, session: Session = Depends(get_session)):
     session.refresh(new_user)
     
     return new_user
+
+@router.post("/login", response_model=Token)
+def login(
+    login_data: LoginRequest,
+    response: Response,
+    session: Session = Depends(get_session)
+):
+    statement = select(AppUser).where(AppUser.email == login_data.email)
+    user = session.exec(statement).first()
+    
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user",
+        )
+    
+    # Create session
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    
+    user_session = UserSession(
+        user_id=user.id,
+        session_token=token,
+        expires_at=expires_at
+    )
+    session.add(user_session)
+    session.commit()
+    
+    # Set cookie
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        expires=expires_at
+    )
+    
+    return Token(session_token=token)
