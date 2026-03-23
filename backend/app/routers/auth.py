@@ -4,8 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlmodel import Session, select
 from app.db import get_session
-from app.models import AppUser, Tenant, UserSession
-from app.schemas import UserCreate, UserResponse, LoginRequest, Token
+from app.models import AppUser, Tenant, UserSession, PasswordResetToken
+from app.schemas import UserCreate, UserResponse, LoginRequest, Token, PasswordResetRequest, PasswordResetConfirm
 from app.security import get_password_hash, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -99,3 +99,70 @@ def logout(
     
     response.delete_cookie(key="session_token")
     return {"detail": "Successfully logged out"}
+
+@router.post("/password-reset-request")
+def request_password_reset(
+    request_in: PasswordResetRequest,
+    session: Session = Depends(get_session)
+):
+    statement = select(AppUser).where(AppUser.email == request_in.email)
+    user = session.exec(statement).first()
+    
+    # Always return success to avoid user enumeration
+    if user:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token=token,
+            expires_at=expires_at
+        )
+        session.add(reset_token)
+        session.commit()
+        
+        # TODO: Send email with token
+        print(f"DEBUG: Password reset token for {user.email}: {token}")
+        
+    return {"detail": "If the email exists, a reset link has been sent."}
+
+@router.post("/password-reset-confirm")
+def confirm_password_reset(
+    confirm_in: PasswordResetConfirm,
+    session: Session = Depends(get_session)
+):
+    statement = select(PasswordResetToken).where(
+        PasswordResetToken.token == confirm_in.token,
+        PasswordResetToken.used_at == None,
+        PasswordResetToken.expires_at > datetime.now(timezone.utc)
+    )
+    reset_token = session.exec(statement).first()
+    
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token"
+        )
+    
+    user = session.get(AppUser, reset_token.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Update password
+    user.hashed_password = get_password_hash(confirm_in.new_password)
+    session.add(user)
+    
+    # Mark token as used
+    reset_token.used_at = datetime.now(timezone.utc)
+    session.add(reset_token)
+    
+    # Invalidate all existing sessions for this user
+    from sqlmodel import delete
+    session.exec(delete(UserSession).where(UserSession.user_id == user.id))
+    
+    session.commit()
+    
+    return {"detail": "Password has been reset successfully"}
