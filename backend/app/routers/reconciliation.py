@@ -1,12 +1,15 @@
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from app.deps import get_session, CurrentTenantID, get_current_user
-from app.models import ReconciliationRun, Match, AuditLogRecord, AppUser
+from app.models import ReconciliationRun, Match, AuditLogRecord, AppUser, ExportRecord, BankTransaction, AdminEntry
 from app.schemas import ReconciliationRunCreate, ReconciliationRunResponse, MatchResponse
 from app.matching.service import MatchingService
 import json
+import io
+import csv
 
 router = APIRouter(prefix="/reconciliation", tags=["reconciliation"])
 
@@ -88,7 +91,6 @@ def confirm_match(
         return match
         
     # Enforce no double reconciliation (Task 7.3)
-    # Check if bank transaction is already matched in ANOTHER record
     already_matched_bank = session.exec(
         select(Match).where(
             Match.bank_transaction_id == match.bank_transaction_id,
@@ -170,3 +172,110 @@ def reject_match(
     session.commit()
     session.refresh(match)
     return match
+
+@router.get("/runs/{run_id}/export/csv")
+def export_run_csv(
+    run_id: UUID,
+    user: AppUser = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    tenant_id = user.tenant_id
+    run = session.get(ReconciliationRun, run_id)
+    if not run or run.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+        
+    # Matches (matched/suggested/rejected)
+    matches = session.exec(select(Match).where(Match.run_id == run_id)).all()
+    matched_bank_ids = {m.bank_transaction_id for m in matches if m.bank_transaction_id}
+    matched_admin_ids = {m.admin_entry_id for m in matches if m.admin_entry_id}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Match Status", "Score", "Bank Date", "Bank Description", "Bank Amount", 
+        "Admin Date", "Admin Description", "Admin Amount", "Decision Type", "Explanation"
+    ])
+    
+    # 1. Export actual matches
+    for m in matches:
+        bank_tx = session.get(BankTransaction, m.bank_transaction_id)
+        admin_e = session.get(AdminEntry, m.admin_entry_id)
+        
+        writer.writerow([
+            m.status,
+            m.score,
+            bank_tx.date.strftime("%Y-%m-%d") if bank_tx else "",
+            bank_tx.description if bank_tx else "",
+            bank_tx.amount if bank_tx else "",
+            admin_e.date.strftime("%Y-%m-%d") if admin_e else "",
+            admin_e.description if admin_e else "",
+            admin_e.amount if admin_e else "",
+            m.decision_type,
+            m.explanation_json
+        ])
+    
+    # 2. Export unmatched bank transactions as 'pending'
+    # For now, we consider all bank transactions of the tenant that are not matched in ANY run
+    # (Matching the logic in MatchingService.run_reconciliation)
+    unmatched_bank = session.exec(select(BankTransaction).where(
+        BankTransaction.tenant_id == tenant_id,
+        ~select(Match).where(Match.bank_transaction_id == BankTransaction.id, Match.status == "matched").exists(),
+        BankTransaction.id.not_in(matched_bank_ids) if matched_bank_ids else True
+    )).all()
+    
+    for bt in unmatched_bank:
+        writer.writerow([
+            "pending",
+            0.0,
+            bt.date.strftime("%Y-%m-%d"),
+            bt.description,
+            bt.amount,
+            "", "", "",
+            "none",
+            "No candidates found"
+        ])
+        
+    # 3. Export unmatched admin entries as 'pending'
+    unmatched_admin = session.exec(select(AdminEntry).where(
+        AdminEntry.tenant_id == tenant_id,
+        ~select(Match).where(Match.admin_entry_id == AdminEntry.id, Match.status == "matched").exists(),
+        AdminEntry.id.not_in(matched_admin_ids) if matched_admin_ids else True
+    )).all()
+    
+    for ae in unmatched_admin:
+        writer.writerow([
+            "pending",
+            0.0,
+            "", "", "",
+            ae.date.strftime("%Y-%m-%d"),
+            ae.description,
+            ae.amount,
+            "none",
+            "No candidates found"
+        ])
+        
+    file_name = f"reconciliation_export_{run_id}.csv"
+    export_rec = ExportRecord(
+        tenant_id=tenant_id,
+        run_id=run_id,
+        file_name=file_name,
+        export_type="csv"
+    )
+    session.add(export_rec)
+    
+    audit = AuditLogRecord(
+        tenant_id=tenant_id,
+        user_id=user.id,
+        event_type="RECONCILIATION_EXPORTED",
+        description=f"CSV Export generated for run '{run.name}'.",
+        metadata_json=json.dumps({"run_id": str(run_id), "export_id": str(export_rec.id)})
+    )
+    session.add(audit)
+    session.commit()
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={file_name}"}
+    )

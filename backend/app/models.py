@@ -105,3 +105,12 @@ class Match(SQLModel, table=True):
     decided_by: Optional[UUID] = Field(default=None, foreign_key="appuser.id")
     decided_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ExportRecord(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    tenant_id: UUID = Field(foreign_key="tenant.id", index=True)
+    run_id: UUID = Field(foreign_key="reconciliationrun.id", index=True)
+    file_name: str
+    export_type: str = Field(index=True)  # "csv"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
