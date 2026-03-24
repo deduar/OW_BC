@@ -28,6 +28,7 @@ services:
       DB_NAME: ${POSTGRES_DB:-owbc}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-change-me}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
     ports:
       - "127.0.0.1:8000:8000"
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
@@ -35,6 +36,8 @@ services:
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
       - ./backend/alembic.ini:/app/alembic.ini
+      - uploads_data:/app/uploads
+      - ./data:/app/data
     networks:
       - app-net
       - internal-net
@@ -77,6 +80,7 @@ services:
 
 volumes:
   db_data:
+  uploads_data:
 
 networks:
   # app-net is for communication between frontend and backend.

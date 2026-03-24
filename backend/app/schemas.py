@@ -30,3 +30,13 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
+class FileUploadResponse(BaseModel):
+    id: UUID
+    original_filename: str
+    file_type: str
+    status: str
+    upload_timestamp: datetime
+
+    class Config:
+        from_attributes = True
