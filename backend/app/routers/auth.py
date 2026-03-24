@@ -10,6 +10,43 @@ from app.security import get_password_hash, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
+async def get_current_user(
+    session_token: Annotated[str | None, Cookie()] = None,
+    session: Session = Depends(get_session)
+) -> AppUser:
+    if not session_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    
+    statement = select(UserSession).where(
+        UserSession.session_token == session_token,
+        UserSession.expires_at > datetime.now(timezone.utc)
+    )
+    db_session = session.exec(statement).first()
+    
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session"
+        )
+    
+    user = session.get(AppUser, db_session.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive"
+        )
+    
+    return user
+
+
+@router.get("/me", response_model=UserResponse)
+def get_me(current_user: AppUser = Depends(get_current_user)):
+    return current_user
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, session: Session = Depends(get_session)):
     # Check if user already exists
