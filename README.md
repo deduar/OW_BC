@@ -10,6 +10,25 @@ This project implements a **multi-user bank reconciliation assistant** that:
 
 All functional and technical details are captured in **OpenSpec** under `openspec/changes/bank-reconciliation-multi-tenant/` using a spec‑driven workflow.
 
+## Quick Start (Initial Setup)
+
+To set up the environment, build the containers, and initialize the database, run the following command:
+
+```bash
+./setup.sh
+```
+
+This script will:
+1. Create a `.env` file from `.env.example` (if it doesn't exist).
+2. Start the database, backend, and frontend services using Docker Compose.
+3. Wait for the database to be ready.
+4. Run the initial Alembic migrations to set up the schema.
+
+Once finished, you can access:
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check**: [http://localhost:8000/healthz](http://localhost:8000/healthz)
+
 ---
 
 ## Architecture Overview
