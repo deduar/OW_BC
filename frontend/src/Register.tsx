@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 const Register: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [tenant_name, setTenantName] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { register } = useAuth();
@@ -15,7 +16,7 @@ const Register: React.FC = () => {
     setError('');
     setIsSubmitting(true);
     try {
-      await register(email, password);
+      await register(email, password, tenant_name);
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Error during registration');
@@ -28,6 +29,16 @@ const Register: React.FC = () => {
     <div style={{ maxWidth: '400px', margin: '100px auto', padding: '20px', border: '1px solid #ddd', borderRadius: '8px' }}>
       <h2>Register</h2>
       <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px' }}>Company/Tenant Name</label>
+          <input
+            type="text"
+            value={tenant_name}
+            onChange={(e) => setTenantName(e.target.value)}
+            required
+            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+          />
+        </div>
         <div style={{ marginBottom: '15px' }}>
           <label style={{ display: 'block', marginBottom: '5px' }}>Email</label>
           <input

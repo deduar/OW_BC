@@ -10,7 +10,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, tenant_name: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -47,9 +47,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchUser();
   };
 
-  const register = async (email: string, password: string) => {
-    await api.post('/auth/register', { email, password });
-    await fetchUser();
+  const register = async (email: string, password: string, tenant_name: string) => {
+    await api.post('/auth/register', { email, password, tenant_name });
+    await login(email, password);
   };
 
   const logout = async () => {
