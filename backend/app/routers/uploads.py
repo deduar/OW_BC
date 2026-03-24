@@ -238,3 +238,57 @@ async def list_uploads(
             created_at=u.upload_timestamp
         ))
     return result
+
+
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_upload(
+    file_id: UUID,
+    session: SessionDep = None,
+    tenant_id: CurrentTenantID = None
+):
+    from sqlmodel import select
+    from app.models import BankTransaction, AdminEntry, Match
+    
+    statement = select(FileUpload).where(
+        FileUpload.id == file_id,
+        FileUpload.tenant_id == tenant_id
+    )
+    db_file = session.exec(statement).first()
+    
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Delete associated transactions and matches
+    if db_file.file_type == "bank":
+        # Get all bank transactions from this upload
+        tx_stmt = select(BankTransaction).where(BankTransaction.upload_id == file_id)
+        transactions = session.exec(tx_stmt).all()
+        for tx in transactions:
+            # Delete matches for this transaction
+            match_stmt = select(Match).where(Match.bank_transaction_id == tx.id)
+            matches = session.exec(match_stmt).all()
+            for m in matches:
+                session.delete(m)
+            session.delete(tx)
+    else:
+        # Get all admin entries from this upload
+        entry_stmt = select(AdminEntry).where(AdminEntry.upload_id == file_id)
+        entries = session.exec(entry_stmt).all()
+        for entry in entries:
+            # Delete matches for this entry
+            match_stmt = select(Match).where(Match.admin_entry_id == entry.id)
+            matches = session.exec(match_stmt).all()
+            for m in matches:
+                session.delete(m)
+            session.delete(entry)
+    
+    # Delete the file record
+    session.delete(db_file)
+    session.commit()
+    
+    # Optionally delete the physical file
+    file_path = Path(settings.UPLOAD_DIR) / str(tenant_id) / str(file_id)
+    if file_path.exists():
+        file_path.unlink()
+    
+    return None

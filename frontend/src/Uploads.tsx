@@ -6,6 +6,7 @@ interface Upload {
   filename: string;
   type: 'bank' | 'admin';
   status: 'pending' | 'processing' | 'succeeded' | 'failed';
+  error_message?: string;
   created_at: string;
 }
 
@@ -27,7 +28,7 @@ const Uploads: React.FC = () => {
 
   useEffect(() => {
     fetchUploads();
-    const interval = setInterval(fetchUploads, 5000); // Poll for status updates
+    const interval = setInterval(fetchUploads, 5000);
     return () => clearInterval(interval);
   }, [fetchUploads]);
 
@@ -51,6 +52,18 @@ const Uploads: React.FC = () => {
       setError(err.response?.data?.detail || 'Upload failed');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this file? This will also remove associated transactions.')) {
+      return;
+    }
+    try {
+      await api.delete(`/uploads/${id}`);
+      fetchUploads();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Delete failed');
     }
   };
 
@@ -83,6 +96,7 @@ const Uploads: React.FC = () => {
             <th style={{ padding: '10px' }}>Type</th>
             <th style={{ padding: '10px' }}>Status</th>
             <th style={{ padding: '10px' }}>Date</th>
+            <th style={{ padding: '10px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -91,17 +105,41 @@ const Uploads: React.FC = () => {
               <td style={{ padding: '10px' }}>{u.filename}</td>
               <td style={{ padding: '10px' }}>{u.type}</td>
               <td style={{ padding: '10px' }}>
-                <span style={{
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  fontSize: '0.85em',
-                  backgroundColor: u.status === 'succeeded' ? '#d4edda' : u.status === 'failed' ? '#f8d7da' : '#fff3cd',
-                  color: u.status === 'succeeded' ? '#155724' : u.status === 'failed' ? '#721c24' : '#856404'
-                }}>
-                  {u.status}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '0.85em',
+                    display: 'inline-block',
+                    backgroundColor: u.status === 'succeeded' ? '#d4edda' : u.status === 'failed' ? '#f8d7da' : '#fff3cd',
+                    color: u.status === 'succeeded' ? '#155724' : u.status === 'failed' ? '#721c24' : '#856404'
+                  }}>
+                    {u.status}
+                  </span>
+                  {u.error_message && (
+                    <span style={{ fontSize: '0.75em', color: '#dc3545' }} title={u.error_message}>
+                      {u.error_message.slice(0, 50)}...
+                    </span>
+                  )}
+                </div>
               </td>
               <td style={{ padding: '10px' }}>{new Date(u.created_at).toLocaleString()}</td>
+              <td style={{ padding: '10px' }}>
+                <button
+                  onClick={() => handleDelete(u.id)}
+                  style={{
+                    padding: '4px 12px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.85em'
+                  }}
+                >
+                  Delete
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
