@@ -40,3 +40,33 @@ class FileUploadResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ReconciliationRunCreate(BaseModel):
+    name: str
+
+class ReconciliationRunResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    name: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class MatchResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    run_id: UUID
+    bank_transaction_id: UUID
+    admin_entry_id: UUID
+    score: float
+    explanation_json: Optional[str]
+    status: str
+    decision_type: Optional[str]
+    decided_by: Optional[UUID]
+    decided_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
