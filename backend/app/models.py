@@ -64,9 +64,9 @@ class BankTransaction(SQLModel, table=True):
     upload_id: UUID = Field(foreign_key="fileupload.id", index=True)
     date: datetime = Field(index=True)
     amount: float = Field(index=True)
-    description: str
-    reference_raw: Optional[str] = None
-    reference_normalized: Optional[str] = None
+    description: str = Field(index=True)
+    reference_raw: Optional[str] = Field(default=None, index=True)
+    reference_normalized: Optional[str] = Field(default=None, index=True)
     raw_row_json: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -77,9 +77,9 @@ class AdminEntry(SQLModel, table=True):
     upload_id: UUID = Field(foreign_key="fileupload.id", index=True)
     date: datetime = Field(index=True)
     amount: float = Field(index=True)
-    description: str
-    reference_raw: Optional[str] = None
-    reference_normalized: Optional[str] = None
+    description: str = Field(index=True)
+    reference_raw: Optional[str] = Field(default=None, index=True)
+    reference_normalized: Optional[str] = Field(default=None, index=True)
     raw_row_json: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
