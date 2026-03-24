@@ -41,3 +41,36 @@ def parse_date(date_str: str) -> datetime:
             continue
     
     raise ValueError(f"Unsupported date format: {date_str}")
+
+def normalize_description(description: str) -> str:
+    """
+    Cleans and normalizes bank descriptions to improve matching.
+    Example: "MP *MERCADONA" -> "MERCADONA"
+    """
+    if not description:
+        return ""
+        
+    # Lowercase
+    normalized = description.lower()
+    
+    # Remove common prefixes/noise
+    prefixes = ["mp *", "tpbw ", "cr.i/rec ", "cr.i/ob ", "com. ", "trf.mb ", "trf.ob ", "pago movil cce ", "banesco pago movil ", "pago tdc c/c en cuenta"]
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            
+    # Remove leading numbers/codes (e.g., "0191 ")
+    normalized = re.sub(r"^\d{4,}\s+", "", normalized)
+    
+    # Remove multiple spaces
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    
+    return normalized
+
+def normalize_reference(reference: str) -> str:
+    """
+    Normalizes a reference token to digits-only for substring matching.
+    """
+    if not reference:
+        return ""
+    return re.sub(r"\D", "", reference)
