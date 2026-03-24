@@ -1,5 +1,6 @@
 import os
 import shutil
+import magic
 from pathlib import Path
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form
@@ -14,7 +15,8 @@ ALLOWED_BANK_TYPES = [
     "application/pdf",
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/csv"
+    "text/csv",
+    "text/plain"
 ]
 
 @router.post("/bank", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -23,11 +25,15 @@ async def upload_bank_statement(
     session: SessionDep = None,
     tenant_id: CurrentTenantID = None
 ):
-    # Validate file type
-    if file.content_type not in ALLOWED_BANK_TYPES:
+    # Validate file content with magic bytes
+    content_header = await file.read(2048)
+    file_type = magic.from_buffer(content_header, mime=True)
+    await file.seek(0)
+
+    if file_type not in ALLOWED_BANK_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file type: {file.content_type}. Allowed types: PDF, XLS, XLSX, CSV"
+            detail=f"Invalid file content type: {file_type}. Allowed types: PDF, XLS, XLSX, CSV"
         )
     
     # Create DB record first
@@ -93,13 +99,19 @@ async def upload_admin_report(
     ALLOWED_ADMIN_TYPES = [
         "application/vnd.ms-excel",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "text/csv"
+        "text/csv",
+        "text/plain"
     ]
     
-    if file.content_type not in ALLOWED_ADMIN_TYPES:
+    # Validate file content with magic bytes
+    content_header = await file.read(2048)
+    file_type = magic.from_buffer(content_header, mime=True)
+    await file.seek(0)
+    
+    if file_type not in ALLOWED_ADMIN_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file type: {file.content_type}. Allowed types: XLS, XLSX, CSV"
+            detail=f"Invalid file content type: {file_type}. Allowed types: XLS, XLSX, CSV"
         )
     
     file_id = uuid4()
