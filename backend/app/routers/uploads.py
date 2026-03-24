@@ -16,7 +16,8 @@ ALLOWED_BANK_TYPES = [
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/csv",
-    "text/plain"
+    "text/plain",
+    "text/html"
 ]
 
 @router.post("/bank", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -25,7 +26,6 @@ async def upload_bank_statement(
     session: SessionDep = None,
     tenant_id: CurrentTenantID = None
 ):
-    # Validate file content with magic bytes
     content_header = await file.read(2048)
     file_type = magic.from_buffer(content_header, mime=True)
     await file.seek(0)
@@ -36,7 +36,6 @@ async def upload_bank_statement(
             detail=f"Invalid file content type: {file_type}. Allowed types: PDF, XLS, XLSX, CSV"
         )
     
-    # Create DB record first
     file_id = uuid4()
     storage_path = os.path.join(str(tenant_id), f"{file_id}")
     
@@ -50,21 +49,18 @@ async def upload_bank_statement(
     )
     session.add(db_file)
     session.commit()
-    session.refresh(db_file)
     
-    # Save file
     tenant_dir = Path(settings.UPLOAD_DIR) / str(tenant_id)
     tenant_dir.mkdir(parents=True, exist_ok=True)
-    
     file_path = tenant_dir / str(file_id)
     
+    file_content = b""
     size = 0
     try:
         with file_path.open("wb") as buffer:
-            while content := await file.read(1024 * 1024):  # Read in chunks of 1MB
+            while content := await file.read(1024 * 1024):
                 size += len(content)
                 if size > settings.MAX_UPLOAD_SIZE_BYTES:
-                    # Cleanup
                     buffer.close()
                     file_path.unlink()
                     session.delete(db_file)
@@ -74,10 +70,10 @@ async def upload_bank_statement(
                         detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
                     )
                 buffer.write(content)
+                file_content += content
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        # If any other error, mark as failed in DB
         db_file.status = "failed"
         db_file.error_message = str(e)
         session.add(db_file)
@@ -87,7 +83,42 @@ async def upload_bank_statement(
             detail=f"Could not save file: {str(e)}"
         )
     
-    return db_file
+    try:
+        from app.parsers.csv_parser import parse_bank_csv
+        from app.parsers.excel_parser import parse_bank_excel
+        from app.parsers.pdf_parser import parse_bank_pdf
+        
+        transactions = []
+        if file_type == "text/csv" or file.filename.lower().endswith(".csv"):
+            transactions = parse_bank_csv(file_content, str(tenant_id), str(file_id))
+        elif file_type == "text/html" or file.filename.lower().endswith((".xls", ".xlsx")):
+            transactions = parse_bank_excel(file_content, file.filename, str(tenant_id), str(file_id))
+        elif file_type == "application/pdf":
+            transactions = parse_bank_pdf(file_content, file.filename, str(tenant_id), str(file_id))
+        elif file_type in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]:
+            transactions = parse_bank_excel(file_content, file.filename, str(tenant_id), str(file_id))
+        
+        for tx in transactions:
+            session.add(tx)
+        
+        db_file.status = "succeeded"
+        session.add(db_file)
+        session.commit()
+    except Exception as e:
+        db_file.status = "failed"
+        db_file.error_message = f"Parse error: {str(e)}"
+        session.add(db_file)
+        session.commit()
+    
+    session.refresh(db_file)
+    return FileUploadResponse(
+        id=db_file.id,
+        filename=db_file.original_filename,
+        type=db_file.file_type,
+        status=db_file.status,
+        error_message=db_file.error_message,
+        created_at=db_file.upload_timestamp
+    )
 
 @router.post("/admin", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_admin_report(
@@ -95,7 +126,6 @@ async def upload_admin_report(
     session: SessionDep = None,
     tenant_id: CurrentTenantID = None
 ):
-    # Admin reports are usually CSV/XLS/XLSX
     ALLOWED_ADMIN_TYPES = [
         "application/vnd.ms-excel",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -103,7 +133,6 @@ async def upload_admin_report(
         "text/plain"
     ]
     
-    # Validate file content with magic bytes
     content_header = await file.read(2048)
     file_type = magic.from_buffer(content_header, mime=True)
     await file.seek(0)
@@ -127,13 +156,12 @@ async def upload_admin_report(
     )
     session.add(db_file)
     session.commit()
-    session.refresh(db_file)
     
-    # Save file
     tenant_dir = Path(settings.UPLOAD_DIR) / str(tenant_id)
     tenant_dir.mkdir(parents=True, exist_ok=True)
     
     file_path = tenant_dir / str(file_id)
+    file_content = b""
     
     size = 0
     try:
@@ -150,6 +178,7 @@ async def upload_admin_report(
                         detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
                     )
                 buffer.write(content)
+                file_content += content
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -162,9 +191,34 @@ async def upload_admin_report(
             detail=f"Could not save file: {str(e)}"
         )
     
-    return db_file
+    try:
+        from app.parsers.admin_parser import parse_admin_report_xlsx
+        
+        entries = parse_admin_report_xlsx(file_content, str(tenant_id), str(file_id))
+        
+        for entry in entries:
+            session.add(entry)
+        
+        db_file.status = "succeeded"
+        session.add(db_file)
+        session.commit()
+    except Exception as e:
+        db_file.status = "failed"
+        db_file.error_message = f"Parse error: {str(e)}"
+        session.add(db_file)
+        session.commit()
+    
+    session.refresh(db_file)
+    return FileUploadResponse(
+        id=db_file.id,
+        filename=db_file.original_filename,
+        type=db_file.file_type,
+        status=db_file.status,
+        error_message=db_file.error_message,
+        created_at=db_file.upload_timestamp
+    )
 
-@router.get("/", response_model=list[FileUploadResponse])
+@router.get("", response_model=list[FileUploadResponse])
 async def list_uploads(
     session: SessionDep = None,
     tenant_id: CurrentTenantID = None
@@ -172,4 +226,15 @@ async def list_uploads(
     from sqlmodel import select
     statement = select(FileUpload).where(FileUpload.tenant_id == tenant_id).order_by(FileUpload.upload_timestamp.desc())
     uploads = session.exec(statement).all()
-    return uploads
+    
+    result = []
+    for u in uploads:
+        result.append(FileUploadResponse(
+            id=u.id,
+            filename=u.original_filename,
+            type=u.file_type,
+            status=u.status,
+            error_message=u.error_message,
+            created_at=u.upload_timestamp
+        ))
+    return result

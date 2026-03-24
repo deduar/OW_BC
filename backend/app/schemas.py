@@ -34,16 +34,19 @@ class PasswordResetConfirm(BaseModel):
 
 class FileUploadResponse(BaseModel):
     id: UUID
-    original_filename: str
-    file_type: str
+    filename: str
+    type: str
     status: str
-    upload_timestamp: datetime
+    error_message: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
 class ReconciliationRunCreate(BaseModel):
-    name: str
+    name: str = "Reconciliation Run"
+    bank_upload_ids: List[str] = []
+    admin_upload_id: str = ""
 
 class ReconciliationRunResponse(BaseModel):
     id: UUID

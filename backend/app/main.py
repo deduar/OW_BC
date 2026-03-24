@@ -50,10 +50,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(uploads.router)
-app.include_router(reconciliation.router)
-app.include_router(audit.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(uploads.router, prefix="/api")
+app.include_router(reconciliation.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 
 @app.get("/healthz")
 def healthz() -> dict:

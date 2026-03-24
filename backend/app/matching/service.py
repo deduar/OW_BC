@@ -10,25 +10,39 @@ class MatchingService:
         self.session = session
         self.engine = MatchingEngine(config)
 
-    def run_reconciliation(self, run_id: UUID, tenant_id: UUID):
-        # 1. Fetch unmatched bank transactions for this tenant/upload
-        # In a real scenario, a run might be linked to specific uploads.
-        # For now, let's assume we match all pending for the tenant.
-        
-        # We need a way to identify which transactions belong to this "run"
-        # Usually, a run is created from specific bank files and admin files.
-        # But for the MVP, let's just get everything that is not already matched.
-        
-        bank_stmt = select(BankTransaction).where(
-            BankTransaction.tenant_id == tenant_id,
-            ~select(Match).where(Match.bank_transaction_id == BankTransaction.id, Match.status == "matched").exists()
-        )
+    def run_reconciliation(
+        self, 
+        run_id: UUID, 
+        tenant_id: UUID,
+        bank_upload_ids: List[str] = None,
+        admin_upload_id: str = None
+    ):
+        # Build query for bank transactions from selected uploads
+        if bank_upload_ids:
+            bank_stmt = select(BankTransaction).where(
+                BankTransaction.tenant_id == tenant_id,
+                BankTransaction.upload_id.in_([UUID(uid) for uid in bank_upload_ids]),
+                ~select(Match).where(Match.bank_transaction_id == BankTransaction.id, Match.status == "matched").exists()
+            )
+        else:
+            bank_stmt = select(BankTransaction).where(
+                BankTransaction.tenant_id == tenant_id,
+                ~select(Match).where(Match.bank_transaction_id == BankTransaction.id, Match.status == "matched").exists()
+            )
         bank_txs = self.session.exec(bank_stmt).all()
         
-        admin_stmt = select(AdminEntry).where(
-            AdminEntry.tenant_id == tenant_id,
-            ~select(Match).where(Match.admin_entry_id == AdminEntry.id, Match.status == "matched").exists()
-        )
+        # Build query for admin entries from selected upload
+        if admin_upload_id:
+            admin_stmt = select(AdminEntry).where(
+                AdminEntry.tenant_id == tenant_id,
+                AdminEntry.upload_id == UUID(admin_upload_id),
+                ~select(Match).where(Match.admin_entry_id == AdminEntry.id, Match.status == "matched").exists()
+            )
+        else:
+            admin_stmt = select(AdminEntry).where(
+                AdminEntry.tenant_id == tenant_id,
+                ~select(Match).where(Match.admin_entry_id == AdminEntry.id, Match.status == "matched").exists()
+            )
         admin_entries = self.session.exec(admin_stmt).all()
         
         for bank_tx in bank_txs:

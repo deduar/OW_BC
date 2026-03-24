@@ -16,6 +16,12 @@ const Workspace: React.FC = () => {
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
   const [selectedAdminId, setSelectedAdminId] = useState<string>('');
   const [isStarting, setIsStarting] = useState(false);
+  
+  const [bankFiles, setBankFiles] = useState<FileList | null>(null);
+  const [adminFile, setAdminFile] = useState<File | null>(null);
+  const [isUploadingBank, setIsUploadingBank] = useState(false);
+  const [isUploadingAdmin, setIsUploadingAdmin] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -34,6 +40,49 @@ const Workspace: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleUploadBank = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bankFiles || bankFiles.length === 0) return;
+    setIsUploadingBank(true);
+    setUploadError('');
+    
+    for (const file of Array.from(bankFiles)) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        await api.post('/uploads/bank', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } catch (err: any) {
+        setUploadError(`${file.name}: ${err.response?.data?.detail || 'Upload failed'}`);
+      }
+    }
+    
+    setBankFiles(null);
+    fetchData();
+    setIsUploadingBank(false);
+  };
+
+  const handleUploadAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminFile) return;
+    setIsUploadingAdmin(true);
+    setUploadError('');
+    const formData = new FormData();
+    formData.append('file', adminFile);
+    try {
+      await api.post('/uploads/admin', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setAdminFile(null);
+      fetchData();
+    } catch (err: any) {
+      setUploadError(err.response?.data?.detail || 'Upload failed');
+    } finally {
+      setIsUploadingAdmin(false);
+    }
+  };
 
   const handleStartRun = async () => {
     if (selectedBankIds.length === 0 || !selectedAdminId) return;
@@ -59,22 +108,59 @@ const Workspace: React.FC = () => {
       
       <div style={{ marginBottom: '30px', border: '1px solid #eee', padding: '20px', borderRadius: '8px' }}>
         <h3>New Reconciliation Run</h3>
+        {uploadError && <p style={{ color: 'red' }}>{uploadError}</p>}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '15px' }}>
           <div>
-            <label style={{ display: 'block', fontWeight: 'bold' }}>Bank Statements (select multiple)</label>
+            <label style={{ display: 'block', fontWeight: 'bold' }}>Bank Statements</label>
+            <form onSubmit={handleUploadBank} style={{ marginBottom: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '5px' }}>
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => setBankFiles(e.target.files)}
+                  accept=".csv,.xls,.xlsx,.pdf"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="submit"
+                  disabled={isUploadingBank || !bankFiles || bankFiles.length === 0}
+                  style={{ padding: '5px 15px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  {isUploadingBank ? '...' : 'Upload'}
+                </button>
+              </div>
+            </form>
             <select
               multiple
               value={selectedBankIds}
               onChange={(e) => setSelectedBankIds(Array.from(e.target.selectedOptions, option => option.value))}
-              style={{ width: '100%', height: '100px', padding: '5px' }}
+              style={{ width: '100%', height: '80px', padding: '5px' }}
             >
               {bankUploads.map(u => (
-                <option key={u.id} value={u.id}>{u.filename} ({new Date(u.created_at).toLocaleDateString()})</option>
+                <option key={u.id} value={u.id}>{u.filename}</option>
               ))}
             </select>
+            <small style={{ color: '#666' }}>Select uploaded files for matching</small>
           </div>
           <div>
             <label style={{ display: 'block', fontWeight: 'bold' }}>Admin Report</label>
+            <form onSubmit={handleUploadAdmin} style={{ marginBottom: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '5px' }}>
+                <input
+                  type="file"
+                  onChange={(e) => setAdminFile(e.target.files?.[0] || null)}
+                  accept=".csv,.xls,.xlsx"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="submit"
+                  disabled={isUploadingAdmin || !adminFile}
+                  style={{ padding: '5px 15px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                  {isUploadingAdmin ? '...' : 'Upload'}
+                </button>
+              </div>
+            </form>
             <select
               value={selectedAdminId}
               onChange={(e) => setSelectedAdminId(e.target.value)}
@@ -82,7 +168,7 @@ const Workspace: React.FC = () => {
             >
               <option value="">Select an admin report</option>
               {adminUploads.map(u => (
-                <option key={u.id} value={u.id}>{u.filename} ({new Date(u.created_at).toLocaleDateString()})</option>
+                <option key={u.id} value={u.id}>{u.filename}</option>
               ))}
             </select>
           </div>

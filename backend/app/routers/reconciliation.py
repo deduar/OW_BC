@@ -29,9 +29,14 @@ def create_reconciliation_run(
     session.commit()
     session.refresh(new_run)
     
-    # Run the matching engine
+    # Run the matching engine with selected uploads
     service = MatchingService(session)
-    service.run_reconciliation(new_run.id, tenant_id)
+    service.run_reconciliation(
+        new_run.id, 
+        tenant_id,
+        bank_upload_ids=run_in.bank_upload_ids,
+        admin_upload_id=run_in.admin_upload_id if run_in.admin_upload_id else None
+    )
     
     # Update status to ready
     new_run.status = "ready"
