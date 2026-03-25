@@ -51,7 +51,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "3000:80"
     networks:
       - app-net
     restart: unless-stopped
