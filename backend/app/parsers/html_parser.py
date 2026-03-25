@@ -1,5 +1,5 @@
 from typing import Iterator
-from app.parsers.csv_parser import normalize_description
+from app.utils.normalization import normalize_description
 
 
 def parse_html_bank_statement(content: bytes, filename: str) -> Iterator[dict]:
@@ -62,9 +62,9 @@ def parse_html_bank_statement(content: bytes, filename: str) -> Iterator[dict]:
     headers = [h.lower().strip() for h in rows[0]]
     
     date_col = next((i for i, h in enumerate(headers) if "fecha" in h or "date" in h), 0)
-    desc_col = next((i for i, h in enumerate(headers) if "descripcion" in h or "detalle" in h or "concepto" in h or "description" in h or "reference" in h or "referencia" in h), 1)
+    desc_col = next((i for i, h in enumerate(headers) if "descripcion" in h or "detalle" in h or "concepto" in h or "description" in h), -1)
     amount_col = next((i for i, h in enumerate(headers) if "monto" in h or "importe" in h or "amount" in h or "valor" in h or "credito" in h or "debito" in h), 2)
-    ref_col = next((i for i, h in enumerate(headers) if "referencia" in h or "ref" in h or "referencia" in h), -1)
+    ref_col = next((i for i, h in enumerate(headers) if "referencia" in h or "ref" in h), -1)
     
     for row in rows[1:]:
         if len(row) <= max(date_col, desc_col, amount_col):

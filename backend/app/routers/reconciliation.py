@@ -1,10 +1,12 @@
 from uuid import UUID
 from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select
 from app.deps import get_session, CurrentTenantID, get_current_user
-from app.models import ReconciliationRun, Match, AuditLogRecord, AppUser, ExportRecord, BankTransaction, AdminEntry
+from app.models import ReconciliationRun, Match, AuditLogRecord, AppUser, ExportRecord, BankTransaction, AdminEntry, FileUpload
 from app.schemas import ReconciliationRunCreate, ReconciliationRunResponse, MatchResponse
 from app.matching.service import MatchingService
 import json
@@ -20,6 +22,29 @@ def create_reconciliation_run(
     session: Session = Depends(get_session)
 ):
     tenant_id = user.tenant_id
+    
+    # Check if the exact same files were already processed in a previous run
+    previous_run = find_previous_run_with_same_files(session, tenant_id, run_in.bank_upload_ids, run_in.admin_upload_id)
+    
+    if previous_run:
+        # Return the existing run instead of creating a new one
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"[RECON] Same files already processed in run {previous_run.id}, returning existing run")
+        
+        # Audit log
+        audit = AuditLogRecord(
+            tenant_id=tenant_id,
+            user_id=user.id,
+            event_type="RECONCILIATION_RUN_REUSED",
+            description=f"Reused existing run '{previous_run.name}' for same files.",
+            metadata_json=json.dumps({"run_id": str(previous_run.id), "original_run_id": str(previous_run.id)})
+        )
+        session.add(audit)
+        session.commit()
+        
+        return previous_run
+    
     new_run = ReconciliationRun(
         tenant_id=tenant_id,
         name=run_in.name,
@@ -57,6 +82,59 @@ def create_reconciliation_run(
     
     return new_run
 
+
+def find_previous_run_with_same_files(session: Session, tenant_id: UUID, bank_upload_ids: List[str], admin_upload_id: str) -> Optional[ReconciliationRun]:
+    """Find a previous run that used the exact same files."""
+    
+    # Get all ready runs for this tenant
+    previous_runs = session.exec(
+        select(ReconciliationRun).where(
+            ReconciliationRun.tenant_id == tenant_id,
+            ReconciliationRun.status == "ready"
+        )
+    ).all()
+    
+    for prev_run in previous_runs:
+        # Get bank transaction IDs from current selection
+        current_bank_ids = set()
+        if bank_upload_ids:
+            for uid in bank_upload_ids:
+                bank_txs = session.exec(
+                    select(BankTransaction.upload_id).where(
+                        BankTransaction.upload_id == UUID(uid)
+                    ).limit(1)
+                ).all()
+                if bank_txs:
+                    current_bank_ids.add(uid)  # Use upload_id instead of transaction IDs
+        
+        # Get the bank upload IDs that were used in previous run
+        prev_bank_ids = set()
+        prev_matches = session.exec(
+            select(Match).where(
+                Match.run_id == prev_run.id
+            )
+        ).all()
+        
+        for m in prev_matches:
+            bt = session.get(BankTransaction, m.bank_transaction_id)
+            if bt:
+                prev_bank_ids.add(str(bt.upload_id))
+        
+        # Get the admin upload ID that was used in previous run
+        prev_admin_id = None
+        for m in prev_matches:
+            ae = session.get(AdminEntry, m.admin_entry_id)
+            if ae:
+                prev_admin_id = str(ae.upload_id)
+                break
+        
+        # Check if same files
+        current_bank_set = set(bank_upload_ids) if bank_upload_ids else set()
+        if current_bank_set == prev_bank_ids and (admin_upload_id == prev_admin_id if admin_upload_id and prev_admin_id else True):
+            return prev_run
+    
+    return None
+
 @router.get("/runs", response_model=List[ReconciliationRunResponse])
 def list_reconciliation_runs(
     tenant_id: CurrentTenantID,
@@ -79,7 +157,158 @@ def list_matches(
     if status_filter:
         statement = statement.where(Match.status == status_filter)
     
-    return session.exec(statement).all()
+    matches = session.exec(statement).all()
+    
+    result = []
+    for match in matches:
+        bt = session.get(BankTransaction, match.bank_transaction_id)
+        ae = session.get(AdminEntry, match.admin_entry_id)
+        
+        result.append(MatchResponse(
+            id=match.id,
+            tenant_id=match.tenant_id,
+            run_id=match.run_id,
+            bank_transaction_id=match.bank_transaction_id,
+            admin_entry_id=match.admin_entry_id,
+            score=match.score,
+            explanation_json=match.explanation_json,
+            status=match.status,
+            decision_type=match.decision_type,
+            decided_by=match.decided_by,
+            decided_at=match.decided_at,
+            created_at=match.created_at,
+            bank_transaction={
+                "id": str(bt.id) if bt else None,
+                "date": bt.date.isoformat() if bt else None,
+                "amount": bt.amount if bt else None,
+                "raw_description": bt.description if bt else None,
+                "reference": bt.reference_raw if bt else None
+            } if bt else None,
+            admin_entry={
+                "id": str(ae.id) if ae else None,
+                "date": ae.date.isoformat() if ae else None,
+                "amount": ae.amount if ae else None,
+                "description": ae.description if ae else None,
+                "reference": ae.reference_raw if ae else None
+            } if ae else None
+        ))
+    
+    return result
+
+@router.get("/runs/{run_id}/suggestions", response_model=List[MatchResponse])
+def list_suggestions(
+    run_id: UUID,
+    tenant_id: CurrentTenantID,
+    session: Session = Depends(get_session)
+):
+    statement = select(Match).where(
+        Match.run_id == run_id,
+        Match.tenant_id == tenant_id,
+        Match.status == "suggested"
+    )
+    
+    matches = session.exec(statement).all()
+    
+    result = []
+    for match in matches:
+        bt = session.get(BankTransaction, match.bank_transaction_id)
+        ae = session.get(AdminEntry, match.admin_entry_id)
+        
+        result.append(MatchResponse(
+            id=match.id,
+            tenant_id=match.tenant_id,
+            run_id=match.run_id,
+            bank_transaction_id=match.bank_transaction_id,
+            admin_entry_id=match.admin_entry_id,
+            score=match.score,
+            explanation_json=match.explanation_json,
+            status=match.status,
+            decision_type=match.decision_type,
+            decided_by=match.decided_by,
+            decided_at=match.decided_at,
+            created_at=match.created_at,
+            bank_transaction={
+                "id": str(bt.id) if bt else None,
+                "date": bt.date.isoformat() if bt else None,
+                "amount": bt.amount if bt else None,
+                "raw_description": bt.description if bt else None,
+                "reference": bt.reference_raw if bt else None
+            } if bt else None,
+            admin_entry={
+                "id": str(ae.id) if ae else None,
+                "date": ae.date.isoformat() if ae else None,
+                "amount": ae.amount if ae else None,
+                "description": ae.description if ae else None,
+                "reference": ae.reference_raw if ae else None
+            } if ae else None
+        ))
+    
+    return result
+
+@router.get("/runs/{run_id}/unmatched")
+def list_unmatched(
+    run_id: UUID,
+    tenant_id: CurrentTenantID,
+    session: Session = Depends(get_session)
+):
+    from app.models import BankTransaction, AdminEntry
+    
+    run = session.get(ReconciliationRun, run_id)
+    if not run or run.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    matched_bank_ids = session.exec(
+        select(Match.bank_transaction_id).where(
+            Match.run_id == run_id,
+            Match.status == "matched"
+        )
+    ).all()
+    
+    matched_admin_ids = session.exec(
+        select(Match.admin_entry_id).where(
+            Match.run_id == run_id,
+            Match.status == "matched"
+        )
+    ).all()
+    
+    unmatched_bank = session.exec(
+        select(BankTransaction).where(
+            BankTransaction.tenant_id == tenant_id,
+            BankTransaction.id.notin_(matched_bank_ids) if matched_bank_ids else True
+        )
+    ).all()
+    
+    unmatched_admin = session.exec(
+        select(AdminEntry).where(
+            AdminEntry.tenant_id == tenant_id,
+            AdminEntry.id.notin_(matched_admin_ids) if matched_admin_ids else True
+        )
+    ).all()
+    
+    return {
+        "bank_transactions": [BankTransactionResponse.model_validate(tx, from_attributes=True) for tx in unmatched_bank],
+        "admin_entries": [AdminEntryResponse.model_validate(ae, from_attributes=True) for ae in unmatched_admin]
+    }
+
+class BankTransactionResponse(BaseModel):
+    id: UUID
+    date: datetime
+    amount: float
+    description: str
+    reference_raw: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+class AdminEntryResponse(BaseModel):
+    id: UUID
+    date: datetime
+    amount: float
+    description: str
+    reference_raw: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 @router.post("/matches/{match_id}/confirm", response_model=MatchResponse)
 def confirm_match(

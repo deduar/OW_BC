@@ -136,53 +136,61 @@ const tabStyle = (isActive: boolean) => ({
 });
 
 const MatchTable: React.FC<{ matches: Match[] }> = ({ matches }) => (
-  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-    <thead>
-      <tr style={{ textAlign: 'left', borderBottom: '1px solid #eee' }}>
-        <th style={{ padding: '10px' }}>Bank Transaction</th>
-        <th style={{ padding: '10px' }}>Admin Entry</th>
-        <th style={{ padding: '10px' }}>Amount</th>
-        <th style={{ padding: '10px' }}>Score</th>
-      </tr>
-    </thead>
-    <tbody>
-      {matches.map(m => (
-        <tr key={m.id} style={{ borderBottom: '1px solid #eee' }}>
-          <td style={{ padding: '10px' }}>
-            <div style={{ fontSize: '0.9em' }}>{m.bank_transaction.raw_description}</div>
-            <div style={{ fontSize: '0.8em', color: '#888' }}>{m.bank_transaction.date}</div>
-          </td>
-          <td style={{ padding: '10px' }}>
-            <div style={{ fontSize: '0.9em' }}>{m.admin_entry.description || 'N/A'}</div>
-            <div style={{ fontSize: '0.8em', color: '#888' }}>Ref: {m.admin_entry.reference} | {m.admin_entry.date}</div>
-          </td>
-          <td style={{ padding: '10px' }}>{m.bank_transaction.amount.toFixed(2)}</td>
-          <td style={{ padding: '10px' }}>{m.score}</td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
+  <div style={{ display: 'grid', gap: '15px' }}>
+    {matches.map(m => (
+      <div key={m.id} style={{ border: '2px solid #28a745', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#d4edda', padding: '10px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 'bold', color: '#155724' }}>Confirmed Match</span>
+          <span style={{ fontSize: '0.85em', color: '#155724' }}>Score: {m.score}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0' }}>
+          <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRight: '1px solid #dee2e6' }}>
+            <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: '#6c757d', marginBottom: '8px', fontWeight: 'bold' }}>Bank Record (Banesco)</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Date:</strong> {m.bank_transaction.date}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Amount:</strong> {m.bank_transaction.amount.toFixed(2)}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Reference:</strong> {m.bank_transaction.reference || 'N/A'}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Description:</strong> {m.bank_transaction.raw_description}</div>
+          </div>
+          <div style={{ padding: '15px', backgroundColor: '#fff' }}>
+            <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: '#6c757d', marginBottom: '8px', fontWeight: 'bold' }}>Admin Record (Fuerza Movil)</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Date:</strong> {m.admin_entry.date}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Amount:</strong> {m.admin_entry.amount.toFixed(2)}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Reference:</strong> {m.admin_entry.reference || 'N/A'}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Description:</strong> {m.admin_entry.description || 'N/A'}</div>
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
 );
 
 const SuggestionTable: React.FC<{ suggestions: Match[], onConfirm: (id: string) => void, onReject: (id: string) => void }> = ({ suggestions, onConfirm, onReject }) => (
   <div style={{ display: 'grid', gap: '15px' }}>
     {suggestions.map(s => (
-      <div key={s.id} style={{ border: '1px solid #eee', padding: '15px', borderRadius: '8px', display: 'grid', gridTemplateColumns: '1fr auto 1fr auto', alignItems: 'center', gap: '20px' }}>
-        <div>
-          <div style={{ fontWeight: 'bold' }}>{s.bank_transaction.raw_description}</div>
-          <div style={{ fontSize: '0.85em', color: '#666' }}>{s.bank_transaction.date} | Amount: {s.bank_transaction.amount.toFixed(2)}</div>
+      <div key={s.id} style={{ border: '2px solid #ffc107', borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#fff3cd', padding: '10px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 'bold', color: '#856404' }}>Suggested Match</span>
+          <span style={{ fontSize: '0.85em', color: '#856404' }}>Score: {s.score}</span>
         </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#28a745' }}>{s.score}</div>
-          <div style={{ fontSize: '0.7em', color: '#888' }}>score</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0' }}>
+          <div style={{ padding: '15px', backgroundColor: '#f8f9fa', borderRight: '1px solid #dee2e6' }}>
+            <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: '#6c757d', marginBottom: '8px', fontWeight: 'bold' }}>Bank Record (Banesco)</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Date:</strong> {s.bank_transaction.date}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Amount:</strong> {s.bank_transaction.amount.toFixed(2)}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Reference:</strong> {s.bank_transaction.reference || 'N/A'}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Description:</strong> {s.bank_transaction.raw_description}</div>
+          </div>
+          <div style={{ padding: '15px', backgroundColor: '#fff' }}>
+            <div style={{ fontSize: '0.75em', textTransform: 'uppercase', color: '#6c757d', marginBottom: '8px', fontWeight: 'bold' }}>Admin Record (Fuerza Movil)</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Date:</strong> {s.admin_entry.date}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Amount:</strong> {s.admin_entry.amount.toFixed(2)}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Reference:</strong> {s.admin_entry.reference || 'N/A'}</div>
+            <div style={{ fontSize: '0.85em', marginBottom: '5px' }}><strong>Description:</strong> {s.admin_entry.description || 'N/A'}</div>
+          </div>
         </div>
-        <div>
-          <div style={{ fontWeight: 'bold' }}>{s.admin_entry.description || 'Admin Entry'}</div>
-          <div style={{ fontSize: '0.85em', color: '#666' }}>Ref: {s.admin_entry.reference} | Date: {s.admin_entry.date} | Amount: {s.admin_entry.amount.toFixed(2)}</div>
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={() => onConfirm(s.id)} style={{ padding: '5px 10px', backgroundColor: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', borderRadius: '4px', cursor: 'pointer' }}>Confirm</button>
-          <button onClick={() => onReject(s.id)} style={{ padding: '5px 10px', backgroundColor: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb', borderRadius: '4px', cursor: 'pointer' }}>Reject</button>
+        <div style={{ padding: '10px 15px', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #dee2e6' }}>
+          <button onClick={() => onReject(s.id)} style={{ padding: '8px 16px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Reject</button>
+          <button onClick={() => onConfirm(s.id)} style={{ padding: '8px 16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Confirm</button>
         </div>
       </div>
     ))}

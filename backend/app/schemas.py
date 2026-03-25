@@ -71,6 +71,8 @@ class MatchResponse(BaseModel):
     decided_by: Optional[UUID]
     decided_at: Optional[datetime]
     created_at: datetime
+    bank_transaction: Optional[dict] = None
+    admin_entry: Optional[dict] = None
 
     class Config:
         from_attributes = True

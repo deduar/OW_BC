@@ -1,4 +1,5 @@
 import os
+import hashlib
 import shutil
 import magic
 from pathlib import Path
@@ -20,6 +21,26 @@ ALLOWED_BANK_TYPES = [
     "text/html"
 ]
 
+
+def calculate_file_hash(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def check_existing_file(session, tenant_id, filename: str, file_hash: str, file_type: str):
+    import logging
+    from sqlmodel import select
+    statement = select(FileUpload).where(
+        FileUpload.tenant_id == tenant_id,
+        FileUpload.original_filename == filename,
+        FileUpload.content_hash == file_hash,
+        FileUpload.file_type == file_type,
+        FileUpload.status == "succeeded"
+    )
+    existing = session.exec(statement).first()
+    logging.warning(f"[UPLOAD] check_existing_file: tenant={tenant_id}, filename={filename}, hash={file_hash[:20] if file_hash else 'None'}..., type={file_type}, found={existing is not None}")
+    return existing
+
+
 @router.post("/bank", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_bank_statement(
     file: UploadFile = File(...),
@@ -36,6 +57,59 @@ async def upload_bank_statement(
             detail=f"Invalid file content type: {file_type}. Allowed types: PDF, XLS, XLSX, CSV"
         )
     
+    file_content = b""
+    size = 0
+    try:
+        while content := await file.read(1024 * 1024):
+            size += len(content)
+            if size > settings.MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
+                )
+            file_content += content
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not read file: {str(e)}"
+        )
+    
+    file_hash = calculate_file_hash(file_content)
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"[UPLOAD] Calculated hash for '{file.filename}': {file_hash}")
+    
+    # Use raw connection to query - bypass ORM caching
+    from app.db import engine
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        result = conn.execute(text("SELECT original_filename, content_hash, status FROM fileupload"))
+        rows = result.fetchall()
+        logger.warning(f"[UPLOAD] Raw SQL - All files in DB: {rows}")
+    
+    # Also check with session
+    session.expire_all()
+    from sqlmodel import select
+    from app.models import FileUpload
+    all_files = session.exec(select(FileUpload)).all()
+    logger.warning(f"[UPLOAD] Session query - All files in DB: {[(f.original_filename, f.content_hash, f.status) for f in all_files]}")
+    
+    existing = check_existing_file(session, tenant_id, file.filename, file_hash, "bank")
+    if existing:
+        logger.warning(f"[UPLOAD] Duplicate detected! File '{file.filename}' already processed. Returning existing ID: {existing.id}")
+        return FileUploadResponse(
+            id=existing.id,
+            filename=existing.original_filename,
+            type=existing.file_type,
+            status="already_processed",
+            error_message=None,
+            created_at=existing.upload_timestamp
+        )
+    
+    logger.warning(f"[UPLOAD] New file '{file.filename}' - processing...")
+    
     file_id = uuid4()
     storage_path = os.path.join(str(tenant_id), f"{file_id}")
     
@@ -45,6 +119,7 @@ async def upload_bank_statement(
         original_filename=file.filename,
         file_type="bank",
         storage_path=storage_path,
+        content_hash=file_hash,
         status="pending"
     )
     session.add(db_file)
@@ -54,26 +129,10 @@ async def upload_bank_statement(
     tenant_dir.mkdir(parents=True, exist_ok=True)
     file_path = tenant_dir / str(file_id)
     
-    file_content = b""
-    size = 0
     try:
         with file_path.open("wb") as buffer:
-            while content := await file.read(1024 * 1024):
-                size += len(content)
-                if size > settings.MAX_UPLOAD_SIZE_BYTES:
-                    buffer.close()
-                    file_path.unlink()
-                    session.delete(db_file)
-                    session.commit()
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
-                    )
-                buffer.write(content)
-                file_content += content
+            buffer.write(file_content)
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
         db_file.status = "failed"
         db_file.error_message = str(e)
         session.add(db_file)
@@ -143,6 +202,38 @@ async def upload_admin_report(
             detail=f"Invalid file content type: {file_type}. Allowed types: XLS, XLSX, CSV"
         )
     
+    file_content = b""
+    size = 0
+    try:
+        while content := await file.read(1024 * 1024):
+            size += len(content)
+            if size > settings.MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
+                )
+            file_content += content
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not read file: {str(e)}"
+        )
+    
+    file_hash = calculate_file_hash(file_content)
+    
+    existing = check_existing_file(session, tenant_id, file.filename, file_hash, "admin")
+    if existing:
+        return FileUploadResponse(
+            id=existing.id,
+            filename=existing.original_filename,
+            type=existing.file_type,
+            status="already_processed",
+            error_message=None,
+            created_at=existing.upload_timestamp
+        )
+    
     file_id = uuid4()
     storage_path = os.path.join(str(tenant_id), f"{file_id}")
     
@@ -152,6 +243,7 @@ async def upload_admin_report(
         original_filename=file.filename,
         file_type="admin",
         storage_path=storage_path,
+        content_hash=file_hash,
         status="pending"
     )
     session.add(db_file)
@@ -161,27 +253,11 @@ async def upload_admin_report(
     tenant_dir.mkdir(parents=True, exist_ok=True)
     
     file_path = tenant_dir / str(file_id)
-    file_content = b""
     
-    size = 0
     try:
         with file_path.open("wb") as buffer:
-            while content := await file.read(1024 * 1024):
-                size += len(content)
-                if size > settings.MAX_UPLOAD_SIZE_BYTES:
-                    buffer.close()
-                    file_path.unlink()
-                    session.delete(db_file)
-                    session.commit()
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_BYTES / (1024*1024)}MB"
-                    )
-                buffer.write(content)
-                file_content += content
+            buffer.write(file_content)
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
         db_file.status = "failed"
         db_file.error_message = str(e)
         session.add(db_file)
