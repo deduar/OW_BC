@@ -1,5 +1,4 @@
 import os
-import hashlib
 import shutil
 import magic
 from pathlib import Path
@@ -20,25 +19,6 @@ ALLOWED_BANK_TYPES = [
     "text/plain",
     "text/html"
 ]
-
-
-def calculate_file_hash(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
-def check_existing_file(session, tenant_id, filename: str, file_hash: str, file_type: str):
-    import logging
-    from sqlmodel import select
-    statement = select(FileUpload).where(
-        FileUpload.tenant_id == tenant_id,
-        FileUpload.original_filename == filename,
-        FileUpload.content_hash == file_hash,
-        FileUpload.file_type == file_type,
-        FileUpload.status == "succeeded"
-    )
-    existing = session.exec(statement).first()
-    logging.warning(f"[UPLOAD] check_existing_file: tenant={tenant_id}, filename={filename}, hash={file_hash[:20] if file_hash else 'None'}..., type={file_type}, found={existing is not None}")
-    return existing
 
 
 @router.post("/bank", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -76,40 +56,6 @@ async def upload_bank_statement(
             detail=f"Could not read file: {str(e)}"
         )
     
-    file_hash = calculate_file_hash(file_content)
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.warning(f"[UPLOAD] Calculated hash for '{file.filename}': {file_hash}")
-    
-    # Use raw connection to query - bypass ORM caching
-    from app.db import engine
-    with engine.connect() as conn:
-        from sqlalchemy import text
-        result = conn.execute(text("SELECT original_filename, content_hash, status FROM fileupload"))
-        rows = result.fetchall()
-        logger.warning(f"[UPLOAD] Raw SQL - All files in DB: {rows}")
-    
-    # Also check with session
-    session.expire_all()
-    from sqlmodel import select
-    from app.models import FileUpload
-    all_files = session.exec(select(FileUpload)).all()
-    logger.warning(f"[UPLOAD] Session query - All files in DB: {[(f.original_filename, f.content_hash, f.status) for f in all_files]}")
-    
-    existing = check_existing_file(session, tenant_id, file.filename, file_hash, "bank")
-    if existing:
-        logger.warning(f"[UPLOAD] Duplicate detected! File '{file.filename}' already processed. Returning existing ID: {existing.id}")
-        return FileUploadResponse(
-            id=existing.id,
-            filename=existing.original_filename,
-            type=existing.file_type,
-            status="already_processed",
-            error_message=None,
-            created_at=existing.upload_timestamp
-        )
-    
-    logger.warning(f"[UPLOAD] New file '{file.filename}' - processing...")
-    
     file_id = uuid4()
     storage_path = os.path.join(str(tenant_id), f"{file_id}")
     
@@ -119,7 +65,6 @@ async def upload_bank_statement(
         original_filename=file.filename,
         file_type="bank",
         storage_path=storage_path,
-        content_hash=file_hash,
         status="pending"
     )
     session.add(db_file)
@@ -179,6 +124,7 @@ async def upload_bank_statement(
         created_at=db_file.upload_timestamp
     )
 
+
 @router.post("/admin", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_admin_report(
     file: UploadFile = File(...),
@@ -221,19 +167,6 @@ async def upload_admin_report(
             detail=f"Could not read file: {str(e)}"
         )
     
-    file_hash = calculate_file_hash(file_content)
-    
-    existing = check_existing_file(session, tenant_id, file.filename, file_hash, "admin")
-    if existing:
-        return FileUploadResponse(
-            id=existing.id,
-            filename=existing.original_filename,
-            type=existing.file_type,
-            status="already_processed",
-            error_message=None,
-            created_at=existing.upload_timestamp
-        )
-    
     file_id = uuid4()
     storage_path = os.path.join(str(tenant_id), f"{file_id}")
     
@@ -243,7 +176,6 @@ async def upload_admin_report(
         original_filename=file.filename,
         file_type="admin",
         storage_path=storage_path,
-        content_hash=file_hash,
         status="pending"
     )
     session.add(db_file)
@@ -294,6 +226,7 @@ async def upload_admin_report(
         created_at=db_file.upload_timestamp
     )
 
+
 @router.get("", response_model=list[FileUploadResponse])
 async def list_uploads(
     session: SessionDep = None,
@@ -334,35 +267,28 @@ async def delete_upload(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Delete associated transactions and matches
     if db_file.file_type == "bank":
-        # Get all bank transactions from this upload
         tx_stmt = select(BankTransaction).where(BankTransaction.upload_id == file_id)
         transactions = session.exec(tx_stmt).all()
         for tx in transactions:
-            # Delete matches for this transaction
             match_stmt = select(Match).where(Match.bank_transaction_id == tx.id)
             matches = session.exec(match_stmt).all()
             for m in matches:
                 session.delete(m)
             session.delete(tx)
     else:
-        # Get all admin entries from this upload
         entry_stmt = select(AdminEntry).where(AdminEntry.upload_id == file_id)
         entries = session.exec(entry_stmt).all()
         for entry in entries:
-            # Delete matches for this entry
             match_stmt = select(Match).where(Match.admin_entry_id == entry.id)
             matches = session.exec(match_stmt).all()
             for m in matches:
                 session.delete(m)
             session.delete(entry)
     
-    # Delete the file record
     session.delete(db_file)
     session.commit()
     
-    # Optionally delete the physical file
     file_path = Path(settings.UPLOAD_DIR) / str(tenant_id) / str(file_id)
     if file_path.exists():
         file_path.unlink()

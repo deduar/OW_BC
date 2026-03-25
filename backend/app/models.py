@@ -52,7 +52,6 @@ class FileUpload(SQLModel, table=True):
     original_filename: str
     file_type: str = Field(index=True)  # "bank" or "admin"
     storage_path: str
-    content_hash: Optional[str] = Field(default=None, index=True)
     status: str = Field(default="pending", index=True)  # pending, processing, succeeded, failed
     error_message: Optional[str] = None
     metadata_json: Optional[str] = None
