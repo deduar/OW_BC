@@ -1,158 +1,181 @@
-## OW_BC – Bank Reconciliation Assistant
+# OW_BC – Bank Reconciliation Assistant
 
-This project implements a **multi-user bank reconciliation assistant** that:
+A **multi-user bank reconciliation assistant** that:
 
-- Imports **bank statements** (PDF/CSV/XLS/XLSX) from multiple banks.
-- Imports **administrative reports** (e.g. Fuerza Movil Excel files).
-- Normalizes and matches transactions automatically (amount, date window, description, and `Referencia` substring logic).
-- Provides a **review UI** for manual reconciliation and exports **audit reports**.
-- Runs as a **two-tier web app** (frontend + backend) with a **PostgreSQL** database, deployed with **Docker Compose**.
+- Imports **bank statements** (PDF/CSV/XLS/XLSX) from multiple banks
+- Imports **administrative reports** (e.g., Fuerza Movil Excel files)
+- Normalizes and matches transactions automatically using:
+  - `Referencia` substring matching (most important)
+  - Amount matching
+  - Date proximity (within tolerance)
+  - Description similarity
+- Provides a **review UI** for manual reconciliation
+- Exports **audit reports** (CSV)
+- Runs as a **two-tier web app** (frontend + backend) with **PostgreSQL**, deployed with **Docker Compose**
 
-All functional and technical details are captured in **OpenSpec** under `openspec/changes/bank-reconciliation-multi-tenant/` using a spec‑driven workflow.
+---
 
-## Quick Start (Initial Setup)
-
-To set up the environment, build the containers, and initialize the database, run the following command:
+## Quick Start
 
 ```bash
 ./setup.sh
 ```
 
 This script will:
-1. Create a `.env` file from `.env.example` (if it doesn't exist).
-2. Start the database, backend, and frontend services using Docker Compose.
-3. Wait for the database to be ready.
-4. Run the initial Alembic migrations to set up the schema.
+1. Create a `.env` file from `.env.example` (if it doesn't exist)
+2. Start the database, backend, and frontend services
+3. Run the initial database migrations
 
-Once finished, you can access:
-- **Frontend**: [http://localhost:3000](http://localhost:3000)
-- **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check**: [http://localhost:8000/healthz](http://localhost:8000/healthz)
+Access:
+- **Frontend**: http://localhost:3000
+- **Backend API Docs**: http://localhost:8000/docs
 
 ---
 
-## Architecture Overview
+## Architecture
 
-- **Frontend**
-  - React + TypeScript + Vite (SPA).
-  - Handles:
-    - User registration/login/logout.
-    - File uploads for bank statements and administrative reports.
-    - Reconciliation workspace (matched / suggested / unmatched).
-    - Manual confirm/reject flows and export downloads.
+### Frontend
+- React + TypeScript + Vite
+- User registration/login/logout
+- File uploads for bank statements and admin reports
+- Reconciliation workspace (Matched / Suggested / Unmatched tabs)
+- Manual confirm/reject for suggestions
+- CSV export
 
-- **Backend**
-  - Python **FastAPI** (REST API).
-  - Responsibilities:
-    - Auth (registration, login, logout, session management).
-    - Multi-tenancy enforcement (tenant == user in MVP).
-    - File uploads and storage (bank + admin reports).
-    - Parsing & normalization (CSV/XLS/XLSX/PDF).
-    - Matching engine (amount, date ±2 days, description similarity, `Referencia` substring).
-    - Reconciliation workflow and audit logging.
-    - Export generation (at least CSV).
+### Backend
+- Python FastAPI (REST API)
+- Multi-tenancy (one tenant per user in MVP)
+- File parsing: CSV, XLS, XLSX, PDF, HTML (Banesco format)
+- Matching engine with configurable weights
+- Audit logging
 
-- **Database**
-  - **PostgreSQL**.
-  - Stores:
-    - Users, tenants, sessions.
-    - Upload metadata and import jobs.
-    - Normalized transactions and administrative entries.
-    - Match candidates, reconciliations, and audit events.
+### Database
+- PostgreSQL
+- Stores: users, tenants, sessions, uploads, transactions, matches, audit logs
 
-- **Deployment & Ops**
-  - `docker-compose.yml` orchestrates:
-    - `frontend` (built static assets served via a lightweight web server).
-    - `backend` (FastAPI app container).
-    - `db` (PostgreSQL with persistent volume).
-    - Optional `migrate` job for DB migrations.
-  - Configuration via environment variables / `.env` (DB credentials, secrets, CORS origin, upload limits).
+### Deployment
+- Docker Compose orchestrates: frontend, backend, db
+- Environment variables for configuration
 
 ---
 
-## Spec‑Driven Development
+## Features
 
-This repo uses **OpenSpec** with the `spec-driven` schema.
+### Smart Duplicate Detection
+- Files are identified by content hash (SHA256)
+- Uploading the same file twice returns "already_processed" instead of re-parsing
+- Reconciliation runs reuse previous matches when the same files are selected
 
-Active change:
+### Matching Engine
+The matching algorithm prioritizes:
+1. **`Referencia` substring match** (highest weight) - finds admin reference within bank reference field
+2. Amount exact match
+3. Date proximity
+4. Description similarity
 
-- `openspec/changes/bank-reconciliation-multi-tenant/`
-  - `proposal.md` – Why and what changes.
-  - `design.md` – How (architecture, tech choices, risks).
-  - `specs/**/spec.md` – Capability specs:
-    - `user-auth`, `multi-tenancy`, `bank-file-ingestion`, `admin-report-ingestion`,
-      `transaction-normalization`, `matching-engine`, `reconciliation-review`,
-      `audit-and-export`, `deployment-compose`, `security-baseline`.
-  - `tasks.md` – Implementation checklist (used by `/opsx:apply`).
-
-**Workflow:**
-
-1. Propose and refine specs under `openspec/changes/...`.
-2. Run `/opsx:apply` to start implementation guided by `tasks.md`.
-3. Implement backend/frontend/infra according to specs.
-
----
-
-## Running the Project (planned)
-
-> Note: Implementation is not yet complete; these steps describe the intended flow once the core services are in place.
-
-1. **Clone the repo** and move into the project:
-   - `git clone <repo-url>`
-   - `cd OW_BC`
-
-2. **Create a `.env` file** based on `.env.example` (to be added during implementation), including:
-   - `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
-   - `DB_HOST`, `DB_PORT`
-   - `AUTH_SECRET_KEY`
-   - `CORS_ORIGIN`
-   - Upload size limits and other settings.
-
-3. **Run with Docker Compose**:
-   - `docker compose up --build`
-   - This should start:
-     - PostgreSQL
-     - Backend FastAPI
-     - Frontend React app
-
-4. **Access the app**:
-   - Frontend: `http://localhost:3000` (or configured port)
-   - Backend API docs (FastAPI): `http://localhost:8000/docs`
-
-> Security note: PostgreSQL is not exposed to the host network; it is reachable only from the backend container via an internal Docker network.
+### Reconciliation Workflow
+1. Upload bank statement(s) and admin report
+2. Select files and click "Start Matching"
+3. Review matches:
+   - **Matched** (auto-confirmed, score >= threshold)
+   - **Suggested** (needs manual confirm/reject)
+   - **Unmatched** (no candidates found)
+4. Confirm or reject suggestions
+5. Export results to CSV
 
 ---
 
-## Data Samples
+## Sample Data
 
-Realistic sample data is under `data/example/`:
+Located in `data/example/01/`:
 
-- Bank CSVs (`julio provincial dl.CSV`).
-- Bank XLS (`Movimientos Banesco.xls`).
-- Bank PDFs (`Banesco_cte...pdf`).
-- Fuerza Movil administrative reports (`pagos FuerzaMovil.xlsx`, `FuerzaMovil 2025 Don Lucho.xlsx`).
-
-These samples are used to drive parsing, normalization, and matching logic (especially `Referencia` substring matching between Fuerza Movil and bank records).
+| File | Type | Description |
+|------|------|-------------|
+| `Movimientos Banesco.xls` | Bank | HTML-formatted bank statement |
+| `pagos FuerzaMovil.xlsx` | Admin | Payment report from Fuerza Movil |
 
 ---
 
-## Development Notes
+## Development
 
-- **Backend**
-  - FastAPI + SQLAlchemy/SQLModel + Alembic (migrations).
-  - Unit tests for:
-    - Normalization (ES numbers, dates, descriptions, `Referencia`).
-    - Matching engine scoring and `Referencia` substring rule.
-    - Multi-tenancy enforcement (no cross-tenant leakage).
+### Backend
+```bash
+docker compose build backend
+docker compose up -d backend
+```
 
-- **Frontend**
-  - React + TypeScript + Vite.
-  - Emphasis on:
-    - Clear upload flows and statuses.
-    - Transparent reconciliation UI (scores, explanations).
+View logs:
+```bash
+docker logs ow_bc-backend-1 -f
+```
 
-- **Security**
-  - Authenticated access for all tenant data.
-  - Server-side sessions stored in DB, exposed via HttpOnly, Secure cookie.
-  - Strict CORS, security headers, rate limiting, and upload validation.
+### Frontend
+```bash
+cd frontend && npm run dev
+```
 
+### Database Access
+```bash
+docker exec -i ow_bc-db-1 psql -U owbc -d owbc
+```
+
+### Common Commands
+
+Run migrations:
+```bash
+docker exec ow_bc-backend-1 alembic upgrade head
+```
+
+Create migration:
+```bash
+docker exec ow_bc-backend-1 alembic revision --autogenerate -m "description"
+```
+
+Reset database (development only):
+```bash
+docker exec -i ow_bc-db-1 psql -U owbc -d owbc -c "
+DELETE FROM match;
+DELETE FROM banktransaction;
+DELETE FROM adminentry;
+DELETE FROM fileupload;
+DELETE FROM reconciliationrun;
+"
+```
+
+---
+
+## Security Notes
+
+- PostgreSQL is not exposed externally (internal network only)
+- Server-side sessions with HttpOnly cookies
+- Strict CORS configuration
+- File upload validation and size limits
+- Tenant isolation enforced at API level
+
+---
+
+## Project Structure
+
+```
+OW_BC/
+├── backend/
+│   ├── app/
+│   │   ├── parsers/       # File parsing (CSV, XLS, XLSX, PDF, HTML)
+│   │   ├── routers/       # API endpoints
+│   │   ├── matching/      # Matching engine
+│   │   ├── schemas/       # Pydantic models
+│   │   ├── models.py      # SQLModel models
+│   │   └── utils/         # Normalization utilities
+│   ├── migrations/        # Alembic migrations
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── Workspace.tsx # Main reconciliation UI
+│   │   ├── RunDetails.tsx # Match review UI
+│   │   └── ...
+│   └── nginx.conf
+├── data/
+│   └── example/          # Sample files
+├── docker-compose.yml
+└── README.md
+```
