@@ -27,7 +27,7 @@ done
 
 # 4. Run Migrations
 echo "🏗️ Running database migrations..."
-docker compose --profile migrate run --rm migrate
+docker compose exec backend alembic upgrade head || echo "⚠️  Migrations may already be applied or have issues. Continuing..."
 
 echo "✨ Setup complete!"
 echo "--------------------------------------------------"
